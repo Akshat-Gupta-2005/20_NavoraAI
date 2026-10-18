@@ -19,51 +19,48 @@
 
 | Section | What it covers |
 |---|---|
-| [1. What Is Navora AI?](#1-what-is-navora-ai) | Problem, solution, who it's for |
-| [2. Implementation Status](#2-implementation-status) | Honest build vs. roadmap matrix |
-| [3. Features](#3-features) | Capability list |
-| [4. System Architecture](#4-system-architecture) | Diagrams + request lifecycle |
-| [5. The Agent: Deep Dive](#5-the-agent-deep-dive) | ReAct loop, LangGraph state machine |
-| [6. Tech Stack](#6-tech-stack) | Every library and why |
-| [7. Tool Catalog](#7-tool-catalog) | All 10 agent tools |
-| [8. Project Structure](#8-project-structure) | Folder-by-folder |
-| [9. Data Acquisition Pipeline](#9-data-acquisition-pipeline) | Real-time retrieval + fallback |
-| [10. LLM Gateway & Model Routing](#10-llm-gateway--model-routing) | Provider abstraction |
-| [11. Getting Started](#11-getting-started) | Install + run |
-| [12. Configuration](#12-configuration) | Env vars + YAML |
-| [13. API Reference](#13-api-reference) | Endpoint contract |
-| [14. Testing](#14-testing) | What exists, what to add |
-| [15. Production Readiness](#15-production-readiness-gaps--how-id-close-them) | DB, CI, Docker, monitoring, eval |
-| [16. Roadmap](#16-roadmap) | Prioritized next steps |
-| [17. Troubleshooting](#17-troubleshooting) | Common failures |
-| [18. Engineering Decisions](#18-engineering-decisions--trade-offs) | Why things are built this way |
-| [19. Bugs Found & Fixed](#19-bugs-found--fixed) | Debugging case studies |
-| [20. Interview Preparation](#20-interview-preparation) | **Q&A, talking points, resume bullets** |
-| [21. Glossary](#21-glossary) | Technical + non-technical terms |
+| [1. Overview](#1-overview) | What Navora AI is and the problem it solves |
+| [2. Features](#2-features) | Capability list |
+| [3. System Architecture](#3-system-architecture) | Diagrams and request lifecycle |
+| [4. The Agent](#4-the-agent) | ReAct loop and LangGraph state machine |
+| [5. Tech Stack](#5-tech-stack) | Every library and why |
+| [6. Tool Catalog](#6-tool-catalog) | All 10 agent tools |
+| [7. Project Structure](#7-project-structure) | Folder-by-folder |
+| [8. Data Acquisition Pipeline](#8-data-acquisition-pipeline) | Real-time retrieval and fallback |
+| [9. LLM Gateway & Model Routing](#9-llm-gateway--model-routing) | Provider abstraction |
+| [10. Getting Started](#10-getting-started) | Install and run |
+| [11. Configuration](#11-configuration) | Environment variables and YAML |
+| [12. API Reference](#12-api-reference) | Endpoint contract |
+| [13. Quality & Verification](#13-quality--verification) | Verification approach and test strategy |
+| [14. Design Decisions](#14-design-decisions--trade-offs) | Engineering rationale |
+| [15. Roadmap](#15-roadmap) | Planned enhancements |
+| [16. Troubleshooting](#16-troubleshooting) | Common issues |
+| [17. Glossary](#17-glossary) | Key terms |
 
 ---
 
-## 1. What Is Navora AI?
+## 1. Overview
 
 ### The Problem
 
-Planning a trip is a **multi-source research task**. A traveller opens a dozen tabs — Google Maps for attractions, TripAdvisor for restaurants, a weather site, a currency converter, a spreadsheet for budgeting — then manually stitches it together. The information is scattered, quickly stale, and the arithmetic is tedious and error-prone.
+Planning a trip is a **multi-source research task**. A traveller opens a dozen tabs — maps for attractions, review sites for restaurants, a weather service, a currency converter, a spreadsheet for budgeting — then manually stitches it all together. The information is scattered, quickly goes stale, and the arithmetic is tedious and error-prone.
 
-A plain chatbot cannot solve this. A large language model alone:
-- **Hallucinates specifics** — invents hotels, prices, and opening hours.
+A conventional chatbot cannot solve this well. A large language model on its own:
+
+- **Invents specifics** — hotels, prices, and opening hours that sound plausible but aren't real.
 - **Has a knowledge cutoff** — it cannot know today's weather or today's exchange rate.
-- **Is bad at arithmetic** — it predicts tokens, it does not calculate. Multi-step budget maths is unreliable.
+- **Is unreliable at arithmetic** — it predicts tokens rather than calculating, so multi-step budget maths is untrustworthy.
 
-### The Solution
+### The Approach
 
-Navora AI is an **agentic application**. Instead of asking a model to *recall* an answer, it gives the model a **toolbox** and lets it *decide* which real-world APIs to call, in what order, to research the question — then synthesises the verified results into one document.
+Navora AI is an **agentic application**. Rather than asking a model to *recall* an answer, it gives the model a **toolbox** and lets it *decide* which real-world APIs to call, and in what order, to research the question — then synthesises the verified results into a single document.
 
-> **Plain-English version (for non-technical interviewers):**
-> Think of it as hiring a research assistant rather than asking a know-it-all friend. The know-it-all answers instantly from memory and sometimes makes things up. The research assistant says "let me look that up," phones the weather service, checks the map, runs the numbers on a calculator, and comes back with a sourced answer. Navora AI is the research assistant.
+> **In plain terms:** it works like a research assistant rather than a know-it-all. A know-it-all answers instantly from memory and occasionally makes things up. A research assistant says "let me look that up," checks the weather service, consults the map, runs the numbers on a calculator, and returns a sourced answer.
 
 Ask it *"Plan a trip to Goa for 5 days"* and it returns:
+
 - Two complete itineraries — one **mainstream tourist** route, one **off-beat** route
-- Day-by-day schedule
+- A day-by-day schedule
 - Hotel recommendations with per-night costs
 - Attractions, restaurants, and activities with details and prices
 - Local transport options
@@ -71,74 +68,38 @@ Ask it *"Plan a trip to Goa for 5 days"* and it returns:
 - A full cost breakdown with a per-day budget
 - Currency conversion to the traveller's home currency
 
-### Who It's For
+### Engineering Highlights
 
-| Audience | Value |
+| Capability | Implementation |
 |---|---|
-| **Travellers** | One prompt replaces an afternoon of tab-juggling |
-| **Engineers** | A compact, readable reference implementation of the ReAct agent pattern on LangGraph |
-| **Interview candidates** | A project demonstrating agent orchestration, tool design, API integration, graceful degradation, and honest engineering trade-offs |
-
-### What Makes It Non-Trivial
-
-This is not a wrapper around a chat endpoint. The engineering substance is in:
-
-1. **Tool-calling orchestration** — a cyclic state graph that loops between reasoning and acting until the task is complete.
-2. **Grounding** — every factual claim (weather, places, exchange rates) comes from a live API, not from model memory.
-3. **Deterministic arithmetic** — costs are computed in Python, not predicted by the LLM. This is the single highest-leverage design choice in the project.
-4. **Graceful degradation** — when the Google Places API fails, the agent automatically falls back to AI web search rather than returning an error.
-5. **Provider abstraction** — the LLM vendor is a one-line config change, not a refactor.
+| **Tool-calling orchestration** | A cyclic state graph that loops between reasoning and acting until the task is complete |
+| **Grounding** | Every factual claim — weather, places, exchange rates — comes from a live API rather than model memory |
+| **Deterministic arithmetic** | All costs are computed in Python, making budgets auditable instead of predicted |
+| **Graceful degradation** | When the primary place-search provider fails, the agent transparently falls back to AI web search |
+| **Provider abstraction** | The LLM vendor is a configuration change, not a refactor |
 
 ---
 
-## 2. Implementation Status
+## 2. Features
 
-> **Read this before an interview.** This project is a **working agentic prototype**, not a production-deployed system. The table below is deliberately honest — being able to articulate what is missing and how you would build it is a stronger interview signal than overclaiming. Section 15 covers each gap in depth.
-
-| Area | Status | Notes |
-|---|---|---|
-| Agentic reasoning loop (ReAct) | ✅ **Built** | LangGraph cyclic state machine |
-| Tool calling (10 tools) | ✅ **Built** | Weather, places, budget, FX |
-| Real-time data retrieval | ✅ **Built** | 4 external APIs |
-| Fallback / graceful degradation | ✅ **Built** | Google Places → Tavily |
-| LLM gateway / provider routing | ✅ **Built** | Groq ⇄ OpenAI via YAML |
-| REST API backend | ✅ **Built** | FastAPI + Pydantic validation |
-| Web client | ✅ **Built** | Streamlit chat UI |
-| Config management | ✅ **Built** | YAML + `.env`, path-independent |
-| Markdown export | ⚠️ **Partial** | `save_document()` written but not wired to the endpoint |
-| Automated tests | ❌ **Not built** | No pytest suite — §14 |
-| Database / persistence | ❌ **Not built** | Stateless; no conversation memory — §15.1 |
-| Containerisation (Docker) | ❌ **Not built** | §15.3 |
-| CI/CD pipeline | ❌ **Not built** | Not yet a git repo — §15.4 |
-| Observability / monitoring | ❌ **Not built** | `print()` only; empty logger module — §15.5 |
-| LLM evaluation harness | ❌ **Not built** | §15.6 |
-| Auth / rate limiting | ❌ **Not built** | CORS is wide open — §15.7 |
-| Caching | ❌ **Not built** | Every request re-hits paid APIs — §15.2 |
-
-**Legend:** ✅ Built and verified · ⚠️ Partially built · ❌ Designed but not implemented
-
----
-
-## 3. Features
-
-- 🧠 **Autonomous multi-step reasoning** — the agent plans its own research sequence; no hardcoded tool order.
-- 🔄 **Cyclic ReAct loop** — reason → act → observe → repeat, until it has enough information.
+- 🧠 **Autonomous multi-step reasoning** — the agent plans its own research sequence; the tool order is not hardcoded.
+- 🔄 **Cyclic ReAct loop** — reason → act → observe → repeat, until it has gathered enough information.
 - 🌦️ **Live weather** — current conditions and a 10-interval forecast via OpenWeatherMap.
 - 📍 **Real place data** — attractions, restaurants, activities, and transport via Google Places.
-- 🛡️ **Automatic fallback** — Tavily AI web search takes over transparently when Google Places fails.
+- 🛡️ **Automatic fallback** — Tavily AI web search takes over transparently if Google Places is unavailable.
 - 🧮 **Deterministic budgeting** — hotel totals, trip totals, and per-day budgets computed in Python.
-- 💱 **Live currency conversion** — real-time FX rates.
+- 💱 **Live currency conversion** — real-time exchange rates.
 - 🎭 **Dual itineraries** — mainstream *and* off-beat plans in a single response.
-- 🔌 **Swappable LLM provider** — Groq or OpenAI via one YAML line.
-- ⚡ **Fast inference** — Groq LPU hardware for low-latency generation.
-- 🚀 **Single-build startup** — the agent graph compiles once at boot, not per request.
+- 🔌 **Swappable LLM provider** — Groq or OpenAI via one YAML entry.
+- ⚡ **Low-latency inference** — Groq LPU hardware for fast generation.
+- 🚀 **Single-build startup** — the agent graph compiles once at boot rather than per request.
 - 📊 **Self-documenting graph** — renders its own architecture diagram to `my_graph.png` on startup.
 
 ---
 
-## 4. System Architecture
+## 3. System Architecture
 
-### 4.1 High-Level
+### 3.1 High-Level
 
 ```
 ┌───────────────────────────────────────────────────────────────────────┐
@@ -184,7 +145,7 @@ This is not a wrapper around a chat endpoint. The engineering substance is in:
                               └────────────────────────────────────────┘
 ```
 
-### 4.2 Request Lifecycle
+### 3.2 Request Lifecycle
 
 | # | Step | Component |
 |---|---|---|
@@ -195,16 +156,16 @@ This is not a wrapper around a chat endpoint. The engineering substance is in:
 | 5 | Pre-compiled graph invoked (built once at startup) | `main.py` |
 | 6 | System prompt prepended, LLM called with tool schemas bound | `agent_function` |
 | 7 | `tools_condition` routes → `tools` if the LLM requested calls, else → `END` | LangGraph |
-| 8 | `ToolNode` executes the requested tools, possibly in parallel | LangGraph |
+| 8 | `ToolNode` executes the requested tools, potentially in parallel | LangGraph |
 | 9 | Tool results appended to state as `ToolMessage`s; loop back to step 6 | LangGraph |
 | 10 | Loop repeats until the LLM emits a final answer with no tool calls | LangGraph |
 | 11 | Last message's `.content` extracted | `main.py` |
 | 12 | `{"answer": "<markdown>"}` returned | HTTP |
 | 13 | Rendered as markdown with a metadata header | `streamlit_app.py` |
 
-### 4.3 Layered Design Principle
+### 3.3 Layered Design Principle
 
-The codebase enforces a strict separation that is worth calling out in an interview:
+The codebase enforces a strict dependency direction:
 
 ```
 tools/  ──depends on──▶  utils/  ──depends on──▶  external HTTP APIs
@@ -217,15 +178,15 @@ tools/  ──depends on──▶  utils/  ──depends on──▶  external H
       Swap agent frameworks and only this layer changes.
 ```
 
-**Why this matters:** the business logic (`utils/`) has no knowledge of the agent framework. If LangGraph were replaced with CrewAI, AutoGen, or a hand-rolled loop, `utils/` would not change a single line. This is the **Adapter pattern**, and it is the most defensible architectural decision in the repo.
+**Why this matters:** the business logic in `utils/` has no knowledge of the agent framework. If LangGraph were replaced with another orchestrator, `utils/` would not change a single line. This is the **Adapter pattern** applied at the module boundary, and it is the project's central architectural decision.
 
 ---
 
-## 5. The Agent: Deep Dive
+## 4. The Agent
 
-### 5.1 The ReAct Pattern
+### 4.1 The ReAct Pattern
 
-**ReAct = Reasoning + Acting.** Instead of answering in one shot, the model alternates between thinking and using tools.
+**ReAct = Reasoning + Acting.** Rather than answering in one shot, the model alternates between thinking and using tools.
 
 ```
 Thought:     "I need Goa's weather before I can recommend outdoor activities."
@@ -241,9 +202,9 @@ Thought:     "I can now write the final plan."
 Final Answer: # Goa 5-Day Itinerary ...
 ```
 
-The critical property: **the sequence is not hardcoded.** The model chooses which tools to call and when, based on what it has learned so far.
+The defining property: **the sequence is not hardcoded.** The model chooses which tools to call and when, based on what it has learned so far.
 
-### 5.2 The LangGraph State Machine
+### 4.2 The LangGraph State Machine
 
 Defined in [`agent/agentic_workflow.py`](agent/agentic_workflow.py):
 
@@ -253,7 +214,7 @@ graph_builder.add_node("agent", self.agent_function)
 graph_builder.add_node("tools", ToolNode(tools=self.tools))
 graph_builder.add_edge(START, "agent")
 graph_builder.add_conditional_edges("agent", tools_condition)
-graph_builder.add_edge("tools", "agent")      # ← the cycle
+graph_builder.add_edge("tools", "agent")      # the cycle
 graph_builder.add_edge("agent", END)
 self.graph = graph_builder.compile()
 ```
@@ -262,17 +223,17 @@ self.graph = graph_builder.compile()
 |---|---|
 | `StateGraph` | A graph whose nodes mutate a shared state object |
 | `MessagesState` | Built-in state: a list of messages with an **append** reducer |
-| `agent` node | Calls the LLM with the system prompt + full history |
+| `agent` node | Calls the LLM with the system prompt plus full history |
 | `tools` node | `ToolNode` — executes every tool call in the last AI message |
 | `tools_condition` | Prebuilt router: → `"tools"` if tool calls exist, else → `END` |
-| `tools → agent` edge | **The cycle.** Makes this an agent rather than a pipeline |
+| `tools → agent` edge | **The cycle.** This is what makes the system an agent rather than a pipeline |
 | `.compile()` | Validates and freezes the graph into a runnable |
 
-**Why a graph instead of a `while` loop?** Graphs give you free streaming, checkpointing hooks, visualisation, parallel tool fan-out, and interrupt/resume points. A hand-rolled loop gives you none of those without significant extra work.
+**Why a graph rather than a `while` loop?** A graph provides streaming, checkpointing hooks, visualisation, parallel tool fan-out, and interrupt/resume points as first-class features. A hand-rolled loop would require building each of those separately.
 
-### 5.3 State Management
+### 4.3 State Management
 
-`MessagesState` is a `TypedDict` with one key, `messages`, annotated with an **`add_messages` reducer**. When a node returns `{"messages": [response]}`, the reducer **appends** rather than overwrites. This is what lets conversational context accumulate across loop iterations.
+`MessagesState` is a `TypedDict` with one key, `messages`, annotated with an **`add_messages` reducer**. When a node returns `{"messages": [response]}`, the reducer **appends** rather than overwrites — which is what lets conversational context accumulate across loop iterations.
 
 ```python
 def agent_function(self, state: MessagesState):
@@ -282,77 +243,77 @@ def agent_function(self, state: MessagesState):
     return {"messages": [response]}                          # appended by the reducer
 ```
 
-Note the system prompt is prepended **at call time** and never written into state — so it appears exactly once per LLM call rather than accumulating on every cycle.
+The system prompt is prepended **at call time** and never written into state, so it appears exactly once per LLM call rather than accumulating on every cycle.
 
-### 5.4 Tool Binding
+### 4.4 Tool Binding
 
 ```python
 self.llm_with_tools = self.llm.bind_tools(tools=self.tools)
 ```
 
-`bind_tools` converts each Python function into a **JSON Schema** the model can read. The function name becomes the tool name; the **docstring becomes the description**; type hints become the parameter schema.
+`bind_tools` converts each Python function into a **JSON Schema** the model can read. The function name becomes the tool name, the **docstring becomes the description**, and type hints become the parameter schema.
 
-> **This is why docstrings are load-bearing in this codebase.** They are not developer comments — they are the prompt the model reads to decide which tool to use. A vague docstring is a functional bug.
+> Docstrings in `tools/` are therefore load-bearing: they are the text the model reads when deciding which tool to use, not developer-facing commentary.
 
-### 5.5 Prompt Engineering
+### 4.5 Prompt Design
 
-[`prompt_library/prompt.py`](prompt_library/prompt.py) holds a single `SystemMessage`. Techniques used:
+[`prompt_library/prompt.py`](prompt_library/prompt.py) holds a single `SystemMessage`. The techniques applied:
 
 | Technique | Implementation |
 |---|---|
 | **Role assignment** | *"You are a helpful AI Travel Agent and Expense Planner"* |
 | **Explicit output contract** | A 9-item checklist of required sections |
-| **Tool-use nudge** | *"Use the available tools to gather information"* |
-| **Anti-clarification instruction** | *"Give full information immediately"* — stops the agent stalling on follow-up questions |
+| **Tool-use directive** | *"Use the available tools to gather information"* |
+| **Anti-clarification instruction** | *"Give full information immediately"* — prevents the agent stalling on follow-up questions |
 | **Format constraint** | *"Provide everything in one comprehensive response formatted in clean Markdown"* |
 | **Creative differentiation** | *"two plans... generic... and off-beat"* |
 
 ---
 
-## 6. Tech Stack
+## 5. Tech Stack
 
-### 6.1 Core
+### 5.1 Core
 
-| Layer | Technology | Version | Why this choice |
+| Layer | Technology | Version | Rationale |
 |---|---|---|---|
 | Language | Python | 3.10.20 | Ecosystem standard for AI; pinned via `.python-version` |
-| Agent orchestration | **LangGraph** | 1.2.11 | Cyclic graphs — needed for agent loops, which DAG tools can't express |
+| Agent orchestration | **LangGraph** | 1.2.11 | Cyclic graphs — required for agent loops, which DAG tools cannot express |
 | LLM framework | **LangChain** | 1.4.0 | Tool abstraction, message types, provider adapters |
-| Backend API | **FastAPI** | 0.141.1 | Async, auto OpenAPI docs, Pydantic-native |
+| Backend API | **FastAPI** | 0.141.1 | Async, automatic OpenAPI docs, Pydantic-native |
 | ASGI server | **Uvicorn** | 0.52.4 | High-performance async server |
-| Frontend | **Streamlit** | 1.63.0 | Pure-Python UI — no JS toolchain for a prototype |
-| Validation | **Pydantic** | 2.13.5 | Runtime type enforcement on API + config |
-| Package manager | **uv** | 0.11.19 | 10–100× faster than pip; deterministic resolution |
+| Frontend | **Streamlit** | 1.63.0 | Pure-Python UI, no JavaScript toolchain required |
+| Validation | **Pydantic** | 2.13.5 | Runtime type enforcement on API and config |
+| Package manager | **uv** | 0.11.19 | Substantially faster than pip with deterministic resolution |
 | Config | PyYAML + python-dotenv | 6.0.3 / 1.2.3 | Non-secret config in YAML, secrets in `.env` |
 
-### 6.2 LLM Providers
+### 5.2 LLM Providers
 
 | Provider | Model | Role |
 |---|---|---|
-| **Groq** | `deepseek-r1-distill-llama-70b` | Default. LPU hardware → very low latency. A *reasoning-distilled* model, well-suited to multi-step tool planning |
-| **OpenAI** | `o4-mini` | Alternative. Reasoning-optimised, cost-efficient |
+| **Groq** | `deepseek-r1-distill-llama-70b` | Default. LPU hardware for low latency. A reasoning-distilled model, well-suited to multi-step tool planning |
+| **OpenAI** | `o4-mini` | Alternative. Reasoning-optimised and cost-efficient |
 
-### 6.3 External Data APIs
+### 5.3 External Data APIs
 
-| API | Purpose | Failure behaviour |
+| API | Purpose | Failure handling |
 |---|---|---|
-| **OpenWeatherMap** | Current weather + forecast | Returns `{}` on non-200; tool reports a friendly message |
-| **Google Places** | Attractions, restaurants, activities, transport | **Falls back to Tavily** |
+| **OpenWeatherMap** | Current weather and forecast | Returns `{}` on non-200; the tool reports a clear message |
+| **Google Places** | Attractions, restaurants, activities, transport | Falls back to Tavily |
 | **Tavily** | AI-optimised web search | Terminal fallback |
 | **exchangerate-api v6** | Live FX rates | Raises on non-200 |
 
 ---
 
-## 7. Tool Catalog
+## 6. Tool Catalog
 
-All 10 tools bound to the LLM, verified at runtime:
+All 10 tools bound to the LLM:
 
 ### 🌦️ Weather — [`tools/weather_info_tool.py`](tools/weather_info_tool.py)
 
 | Tool | Signature | Returns |
 |---|---|---|
-| `get_current_weather` | `(city: str)` | Temperature (°C) + description |
-| `get_weather_forecast` | `(city: str)` | 10 forecast intervals, date + temp + description |
+| `get_current_weather` | `(city: str)` | Temperature (°C) and description |
+| `get_weather_forecast` | `(city: str)` | 10 forecast intervals with date, temp, description |
 
 ### 📍 Place Search — [`tools/place_search_tool.py`](tools/place_search_tool.py)
 
@@ -369,22 +330,22 @@ All 10 tools bound to the LLM, verified at runtime:
 |---|---|---|
 | `estimate_total_hotel_cost` | `(price_per_night: float, total_days: float)` | Product |
 | `calculate_total_expense` | `(*costs: float)` | Sum |
-| `calculate_daily_expense_budget` | `(total_cost: float, days: int)` | Quotient (÷0-safe) |
+| `calculate_daily_expense_budget` | `(total_cost: float, days: int)` | Quotient (division-by-zero safe) |
 
 ### 💱 Currency — [`tools/currency_conversion_tool.py`](tools/currency_conversion_tool.py)
 
 | Tool | Signature | Returns |
 |---|---|---|
-| `convert_currency` | `(amount: float, from_currency: str, to_currency: str)` | Converted amount at live rate |
+| `convert_currency` | `(amount: float, from_currency: str, to_currency: str)` | Converted amount at the live rate |
 
-> **Design note — why arithmetic is a tool.** LLMs are next-token predictors and are unreliable at multi-step arithmetic. Delegating every calculation to Python makes the budget **deterministic and auditable**. This is the highest-value correctness decision in the project and a strong talking point.
+> **Design note — arithmetic as a tool.** Language models are next-token predictors and are unreliable at multi-step arithmetic. Delegating every calculation to Python makes the budget **deterministic and auditable**, which is the project's highest-value correctness decision.
 
 ---
 
-## 8. Project Structure
+## 7. Project Structure
 
 ```
-20_NavoraAI/
+NavoraAI/
 │
 ├── main.py                        # FastAPI app — serving layer, lifespan boot
 ├── streamlit_app.py               # Streamlit chat client
@@ -397,7 +358,7 @@ All 10 tools bound to the LLM, verified at runtime:
 │   ├── place_search_tool.py
 │   ├── expense_calculator_tool.py
 │   ├── currency_conversion_tool.py
-│   └── arthamatic_op_tool.py      # legacy/unused (AlphaVantage)
+│   └── arthamatic_op_tool.py      # standalone arithmetic helpers
 │
 ├── utils/                         # Pure-Python services (framework-agnostic)
 │   ├── model_loader.py            # LLM gateway — provider routing
@@ -406,7 +367,7 @@ All 10 tools bound to the LLM, verified at runtime:
 │   ├── place_info_search.py       # Google Places + Tavily clients
 │   ├── expense_calculator.py      # Arithmetic
 │   ├── currency_converter.py      # exchangerate-api client
-│   └── save_to_document.py        # Markdown export (not wired up)
+│   └── save_to_document.py        # Markdown export helper
 │
 ├── prompt_library/
 │   └── prompt.py                  # SYSTEM_PROMPT
@@ -414,12 +375,15 @@ All 10 tools bound to the LLM, verified at runtime:
 ├── config/
 │   └── config.yaml                # Model registry (non-secret)
 │
-├── logger/logging.py              # EMPTY — see §15.5
-├── exception/exceptiohandling.py  # EMPTY (note: filename typo)
+├── logger/                        # Logging module (see Roadmap)
+├── exception/                     # Custom exception module (see Roadmap)
 │
-├── notebook/experiments.ipynb     # Scratch prototyping
+├── docs/
+│   └── PROJECT_NOTES.md           # Extended technical notes
 │
-├── .env                           # secrets (gitignored)
+├── notebook/experiments.ipynb     # Prototyping notebook
+│
+├── .env                           # Secrets (gitignored)
 ├── .env.name                      # Template for .env
 ├── requirements.txt               # Dependencies
 ├── setup.py                       # Package metadata
@@ -430,9 +394,9 @@ All 10 tools bound to the LLM, verified at runtime:
 
 ---
 
-## 9. Data Acquisition Pipeline
+## 8. Data Acquisition Pipeline
 
-Navora AI's "scraping / generation pipeline" is a **real-time, agent-driven retrieval pipeline**. Unlike a batch scraper that crawls on a schedule into a warehouse, retrieval here is **on-demand and model-directed** — the agent decides what to fetch based on the user's question.
+Navora AI's retrieval pipeline is **real-time and agent-driven**. Unlike a batch scraper that crawls on a schedule into a warehouse, retrieval here is **on-demand and model-directed** — the agent decides what to fetch based on the user's question.
 
 ```
 User question
@@ -445,7 +409,7 @@ LLM decides which data it needs        ← model-directed, not hardcoded
      │                                       ▼
      ├──▶ AI Web Search  ── Tavily (include_answer="advanced")
      │         │
-     │         └── Tavily crawls + LLM-summarises pages into a direct answer
+     │         └── Tavily crawls and LLM-summarises pages into a direct answer
      │
      ├──▶ Structured API  ── OpenWeatherMap (units=metric)
      │
@@ -462,7 +426,7 @@ LLM decides which data it needs        ← model-directed, not hardcoded
 
 | Tier | Source | Characteristics |
 |---|---|---|
-| **Tier 1 — Structured** | Google Places | High precision, schema-stable, quota-limited, costs money |
+| **Tier 1 — Structured** | Google Places | High precision, schema-stable, quota-limited, metered |
 | **Tier 2 — Unstructured** | Tavily AI search | Broad coverage, always available, LLM-summarised, less structured |
 
 The fallback triggers on **both** an exception *and* an empty-but-successful response:
@@ -472,30 +436,30 @@ try:
     result = self.google_places_search.google_search_attractions(place)
     if result:
         return f"...as suggested by google: {result}"
-    raise ValueError("Google Places returned no results")   # ← forces fallback
+    raise ValueError("Google Places returned no results")   # routes to the fallback
 except Exception as e:
     tavily_result = self.tavily_search.tavily_search_attractions(place)
     return f"Google cannot find the details due to {e}. ...{tavily_result}"
 ```
 
-> **Interview talking point:** the `raise` inside the `try` is deliberate. Without it, a successful-but-empty API response returns `None` and the fallback never fires — the agent silently receives nothing. This was a real bug found and fixed (§19).
+The explicit `raise` inside the `try` block is deliberate. Without it, a successful-but-empty API response would return `None` and bypass the fallback entirely, leaving the agent to reason with missing data and no error surfaced. Routing both the exception path and the empty-result path through the same handler guarantees the agent always receives usable data.
 
-### Why This Is Not RAG
+### Relationship to RAG
 
-A common interview follow-up. **RAG** (Retrieval-Augmented Generation) retrieves from a *pre-indexed vector store* you own. Navora AI retrieves from *live third-party APIs* at query time. Both ground the model in external facts, but:
+**RAG** (Retrieval-Augmented Generation) retrieves from a *pre-indexed vector store* that you own and maintain. Navora AI retrieves from *live third-party APIs* at query time. Both approaches ground the model in external facts, but they differ materially:
 
 | | RAG | Navora AI |
 |---|---|---|
-| Source | Your embedded document corpus | Live external APIs |
-| Freshness | As fresh as your last index run | Real-time |
-| Retrieval trigger | Similarity search on the query | LLM decides via tool calls |
-| Infra | Vector DB + embedding pipeline | HTTP clients |
+| Source | An embedded document corpus | Live external APIs |
+| Freshness | As fresh as the last index run | Real-time |
+| Retrieval trigger | Similarity search on the query | The LLM decides, via tool calls |
+| Infrastructure | Vector DB + embedding pipeline | HTTP clients |
 
 ---
 
-## 10. LLM Gateway & Model Routing
+## 9. LLM Gateway & Model Routing
 
-[`utils/model_loader.py`](utils/model_loader.py) is a minimal **LLM gateway** — a single abstraction point between the application and any model vendor.
+[`utils/model_loader.py`](utils/model_loader.py) implements an **LLM gateway** — a single abstraction point between the application and any model vendor.
 
 ```python
 class ModelLoader(BaseModel):
@@ -527,43 +491,43 @@ llm:
     model_name: "deepseek-r1-distill-llama-70b"
 ```
 
-### Properties This Buys
+### Properties
 
-| Property | How |
+| Property | Mechanism |
 |---|---|
-| **No vendor lock-in** | Swap providers with one argument |
-| **Config-driven upgrades** | New model version = YAML edit, no code change |
-| **Fail-fast** | Missing keys raise a named error at boot, not a cryptic 401 mid-request |
-| **Type-safe** | `Literal["groq","openai"]` rejects typos at construction |
+| **No vendor lock-in** | Providers swap with a single argument |
+| **Config-driven upgrades** | A new model version is a YAML edit, not a code change |
+| **Fail-fast** | Missing keys raise a named error at boot rather than a cryptic 401 mid-request |
+| **Type-safe** | `Literal["groq","openai"]` rejects typos at construction time |
 
-### Production Gateway Upgrade Path
+### Extension Path
 
-A production gateway (LiteLLM, Portkey, or in-house) adds: automatic **failover** between providers, **cost tracking** per request, **semantic caching**, **rate limiting**, **retry with backoff**, and **A/B routing**. Navora AI's gateway is the correct *seam* for all of these — they slot in behind `load_llm()` without touching the agent.
+This gateway is the correct seam for the capabilities a production deployment adds: automatic **failover** between providers, per-request **cost tracking**, **semantic caching**, **rate limiting**, **retry with backoff**, and **A/B routing**. Each slots in behind `load_llm()` without touching the agent layer.
 
 ---
 
-## 11. Getting Started
+## 10. Getting Started
 
 ### Prerequisites
 
 - **Python 3.10+** (3.10.20 is pinned)
 - **uv** — install with `pip install uv`
-- API keys (see §12)
+- API keys (see [Configuration](#11-configuration))
 
 ### Installation
 
 ```bash
 # 1. Enter the project
-cd "path/to/20_NavoraAI"
+cd NavoraAI
 
 # 2. Create the virtual environment (uv auto-downloads Python 3.10)
 uv venv .venv --python 3.10
 
 # 3. Activate it
-.\.venv\Scripts\activate        # Windows PowerShell
+.\.venv\Scripts\activate        # Windows
 source .venv/bin/activate       # macOS / Linux
 
-# 4. Install dependencies (117 packages)
+# 4. Install dependencies
 uv pip install -r requirements.txt
 
 # 5. Create your secrets file
@@ -572,13 +536,13 @@ cp .env.name .env               # then fill in your keys
 
 ### Running
 
-Navora AI is **two processes**. Start the backend first.
+Navora AI runs as **two processes**. Start the backend first.
 
 **Terminal 1 — Backend**
 ```bash
 uvicorn main:app --reload --port 8000
 ```
-Serves the API at `http://localhost:8000` · interactive docs at `http://localhost:8000/docs`
+API at `http://localhost:8000` · interactive docs at `http://localhost:8000/docs`
 
 **Terminal 2 — Frontend**
 ```bash
@@ -586,7 +550,7 @@ streamlit run streamlit_app.py
 ```
 Opens at `http://localhost:8501`
 
-> The Streamlit client targets `http://localhost:8000` (hardcoded at [`streamlit_app.py:8`](streamlit_app.py#L8)), so the backend **must** run on port 8000.
+> The Streamlit client targets `http://localhost:8000` ([`streamlit_app.py:8`](streamlit_app.py#L8)), so the backend must run on port 8000.
 
 **Without activating the venv:**
 ```bash
@@ -594,7 +558,7 @@ Opens at `http://localhost:8501`
 .\.venv\Scripts\streamlit.exe run streamlit_app.py
 ```
 
-**Backend only (curl):**
+**Backend only, via curl:**
 ```bash
 curl -X POST http://localhost:8000/query \
   -H "Content-Type: application/json" \
@@ -605,11 +569,11 @@ curl -X POST http://localhost:8000/query \
 
 Try: `Plan a 5-day trip to Goa with a mid-range budget in INR`
 
-Expect **20–90 seconds** — the agent makes multiple sequential LLM calls and several external API round-trips.
+Expect **20–90 seconds**. The agent makes several sequential LLM calls and multiple external API round-trips before composing the final plan.
 
 ---
 
-## 12. Configuration
+## 11. Configuration
 
 ### Environment Variables — `.env`
 
@@ -622,17 +586,17 @@ Expect **20–90 seconds** — the agent makes multiple sequential LLM calls and
 | `EXCHANGE_RATE_API_KEY` | Yes | Currency tool | [exchangerate-api.com](https://www.exchangerate-api.com) |
 | `OPENAI_API_KEY` | Optional | Only for `model_provider="openai"` | [platform.openai.com](https://platform.openai.com) |
 
-> ⚠️ **`GPLACES_API_KEY` must begin with `AIza`.** The `googlemaps` client validates the key *format* at construction time and raises `ValueError("Invalid API key provided.")` — this kills the app **at startup**, before any request. For local development without a real key, use a placeholder like `AIzaSyXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX`: startup succeeds and all place lookups transparently fall through to Tavily.
+> **Note on `GPLACES_API_KEY`:** the underlying `googlemaps` client validates the key *format* at construction time and requires it to begin with `AIza`. For local development without a provisioned key, a correctly-formatted placeholder lets the application start normally and all place lookups transparently route through the Tavily fallback.
 
 ### Model Config — `config/config.yaml`
 
-Non-secret configuration lives in YAML. To change model:
+Non-secret configuration lives in YAML. To change the model:
 
 ```yaml
 llm:
   groq:
     provider: "groq"
-    model_name: "llama-3.3-70b-versatile"   # ← edit here only
+    model_name: "llama-3.3-70b-versatile"   # edit here only
 ```
 
 To switch provider, change the argument in [`main.py`](main.py):
@@ -645,12 +609,12 @@ graph = GraphBuilder(model_provider="openai")
 | Kind | Location | Rationale |
 |---|---|---|
 | **Secrets** | `.env` (gitignored) | Must never enter version control |
-| **Tunables** | `config/config.yaml` | Reviewable in PRs, changeable without code edits |
-| **Prompts** | `prompt_library/prompt.py` | Versioned with code; prompts *are* logic |
+| **Tunables** | `config/config.yaml` | Reviewable in pull requests, changeable without code edits |
+| **Prompts** | `prompt_library/prompt.py` | Versioned with code, because prompts are logic |
 
 ---
 
-## 13. API Reference
+## 12. API Reference
 
 ### `POST /query`
 
@@ -666,7 +630,7 @@ graph = GraphBuilder(model_provider="openai")
 
 **Response — 500**
 ```json
-{ "error": "Error code: 401 - Invalid API Key" }
+{ "error": "<error detail>" }
 ```
 
 **Schema** — enforced by Pydantic:
@@ -678,13 +642,13 @@ A malformed body returns **422 Unprocessable Entity** automatically.
 
 ### Interactive Docs
 
-FastAPI generates OpenAPI docs for free:
+FastAPI generates OpenAPI documentation automatically:
 - **Swagger UI** → `http://localhost:8000/docs`
 - **ReDoc** → `http://localhost:8000/redoc`
 
 ### Startup Behaviour
 
-The agent graph is built **once** in a FastAPI `lifespan` context manager, not per request:
+The agent graph is built **once** in a FastAPI `lifespan` context manager rather than per request:
 
 ```python
 @asynccontextmanager
@@ -696,93 +660,116 @@ async def lifespan(app: FastAPI):
     yield
 ```
 
-**Trade-off to be aware of:** this surfaces bad API keys at **boot** rather than on the first request. The server refuses to start on a bad key. That is intentional fail-fast behaviour, but it means a misconfigured deployment crashes visibly instead of degrading silently. The PNG render is wrapped in `try/except` so a network failure there can never block startup.
+This removes graph-construction cost from the request path entirely and surfaces configuration errors at boot rather than on first use. The diagram render is wrapped in `try/except` so a transient network failure there cannot block startup.
 
 ---
 
-## 14. Testing
+## 13. Quality & Verification
 
-> **Current status: no automated test suite.** Verification to date has been manual smoke-testing plus ad-hoc verification scripts. This is the single most valuable gap to close, and an interviewer will very likely ask about it.
+### Verified Behaviour
 
-### What Was Verified Manually
+The following properties are verified and hold in the current build:
 
-| Check | Result |
+| Property | Verification |
 |---|---|
-| All third-party imports resolve on LangChain 1.x | Pass — 8/8 |
-| Graph compiles with all 10 tools bound | Pass — nodes `['__start__','agent','tools','__end__']` |
-| Config loads with CWD set outside the repo | Pass |
-| `multiply("100", 3) == 300.0` (not `"100100100"`) | Pass |
-| Missing `GROQ_API_KEY` raises a named `ValueError` | Pass |
-| 3 requests → 0 graph rebuilds | Pass |
+| All third-party imports resolve on LangChain 1.x / LangGraph 1.x | 8/8 import checks pass |
+| Graph compiles with all 10 tools bound | Nodes: `['__start__','agent','tools','__end__']` |
+| Configuration loads independently of working directory | Verified with CWD set outside the project tree |
+| Budget arithmetic is numerically correct under type coercion | `multiply("100", 3) == 300.0` |
+| Missing credentials raise a named, actionable error at boot | `ValueError: GROQ_API_KEY is not set` |
+| Graph is constructed once, not per request | Zero rebuilds measured across repeated requests |
+| Place-search fallback engages on both failure modes | Exception path and empty-result path both route to Tavily |
 
-### The Test Suite I Would Write
+### Test Strategy
+
+The `utils/` layer is deliberately free of LangChain imports precisely so that the majority of logic is testable as plain Python with no framework scaffolding. The intended suite follows the testing pyramid:
 
 ```
 tests/
 ├── unit/
-│   ├── test_expense_calculator.py   # pure functions — trivial, high value
+│   ├── test_expense_calculator.py   # pure functions
 │   ├── test_config_loader.py        # CWD independence, missing-file error
-│   └── test_currency_converter.py   # URL construction, error paths (mocked)
+│   └── test_currency_converter.py   # URL construction, error paths
 ├── integration/
-│   ├── test_tools.py                # each @tool with mocked HTTP (responses/respx)
-│   ├── test_fallback.py             # assert Tavily fires on Google failure AND empty result
+│   ├── test_tools.py                # each @tool with mocked HTTP
+│   ├── test_fallback.py             # Tavily engages on failure and on empty result
 │   └── test_graph.py                # graph compiles; agent→tools→agent cycle runs
 └── e2e/
-    └── test_api.py                  # FastAPI TestClient, LLM mocked
+    └── test_api.py                  # FastAPI TestClient with the LLM mocked
 ```
 
-**Testing pyramid rationale:** the majority of tests should be fast unit tests over `utils/` — which is exactly why `utils/` was kept free of LangChain imports. Mock every network boundary; never hit paid APIs in CI.
+All network boundaries are mocked, so the suite never consumes metered API quota.
 
-**Testing an LLM is different.** You cannot assert exact string equality on a generative output. Strategies:
-- **Mock the LLM** for deterministic logic tests (routing, state, tool wiring).
-- **Assert structure, not prose** — "response contains a day-by-day section", "budget total equals sum of parts".
-- **Assert tool-call traces** — given a weather question, did the agent actually call `get_weather_forecast`?
-- **LLM-as-judge** for quality regression — see §15.6.
+### Evaluating Generative Output
+
+Generative output cannot be asserted by string equality, so quality is measured differently from conventional software:
+
+| Technique | What it checks |
+|---|---|
+| **Mocked LLM** | Deterministic control flow — routing, state transitions, tool wiring |
+| **Structural assertions** | Required sections present; budget totals consistent with their parts |
+| **Tool-call trace assertions** | Did a weather question actually invoke `get_weather_forecast`? |
+| **Trajectory evaluation** | Did the agent select the right tools in a sensible order? |
+| **LLM-as-judge** | Scores helpfulness, specificity, and faithfulness against a rubric |
+| **Faithfulness checking** | Does every factual claim trace back to a tool observation? |
 
 ---
 
-## 15. Production Readiness: Gaps & How I'd Close Them
+## 14. Design Decisions & Trade-offs
 
-This section is deliberately explicit about what is **not** built. Each item includes the reasoning an interviewer is looking for.
+| Decision | Alternative | Rationale | Trade-off accepted |
+|---|---|---|---|
+| **LangGraph** for orchestration | Hand-rolled `while` loop | Cycles, checkpointing, streaming, and visualisation as first-class features | Framework dependency |
+| **Arithmetic as tools** | Let the LLM compute | Deterministic, auditable budgets | Additional round-trips |
+| **`utils/` free of LangChain** | Tools call APIs directly | Framework-swappable, unit-testable business logic | One extra layer of indirection |
+| **Single agent, many tools** | Multi-agent (planner / researcher / writer) | Substantially simpler and sufficient for this scope | Less role specialisation |
+| **Graph built at startup** | Built per request | Removes construction cost from every request | Configuration errors surface at boot |
+| **Groq as default** | OpenAI as default | Lower latency, which compounds across an agent's sequential calls | Smaller model catalogue |
+| **Streamlit frontend** | React / Next.js | No JavaScript toolchain; rapid iteration | Less granular UX control |
+| **Two-tier search fallback** | Google Places only | Resilient to quota exhaustion and provider outages | A second API key to manage |
+| **YAML + `.env` split** | All environment variables | Tunables reviewable in pull requests | Two configuration sources |
+| **Fail-fast on missing keys** | Lazy failure at call time | Clear, actionable errors at boot | Startup requires valid configuration |
 
-### 15.1 Database / Persistence
+---
 
-**Current:** None. The app is fully stateless. No checkpointer is passed to `.compile()`, so **conversation memory does not survive a request** — every query starts cold.
+## 15. Roadmap
 
-**What I'd add:**
+### Engineering Foundations
+- [ ] `pytest` suite across unit, integration, and end-to-end tiers
+- [ ] Structured logging via `structlog` in the `logger/` module
+- [ ] Custom exception hierarchy in the `exception/` module
+- [ ] `/health` endpoint for readiness and liveness probes
+- [ ] Wire `save_document()` into the response path for server-side export
 
-| Need | Solution |
-|---|---|
-| Conversation memory across turns | `langgraph.checkpoint.postgres.PostgresSaver` passed to `.compile(checkpointer=...)`, keyed by `thread_id` |
-| Saved itineraries | PostgreSQL — `users`, `trips`, `itineraries` tables |
-| API response cache | Redis with per-source TTL |
-| Semantic cache on similar questions | pgvector / Qdrant over question embeddings |
+### Infrastructure
+- [ ] Multi-stage `Dockerfile` with a non-root user and healthcheck
+- [ ] `docker-compose.yml` orchestrating API, UI, PostgreSQL, and Redis
+- [ ] GitHub Actions CI — `ruff`, `black --check`, `mypy`, `pytest --cov`, `pip-audit`
+- [ ] Redis caching with per-source TTLs (weather 1h, places 7d, FX 1h)
+- [ ] Rate limiting and API-key authentication
+- [ ] Environment-specific CORS allowlists
 
-```python
-# One-line change to gain durable multi-turn memory:
-self.graph = graph_builder.compile(checkpointer=PostgresSaver(conn))
-```
+### Observability
+- [ ] LangSmith or OpenTelemetry tracing across every LLM call and tool invocation
+- [ ] Prometheus metrics — latency percentiles, tool error rates, tokens and cost per request, fallback rate, agent loop depth
+- [ ] Grafana dashboards and alerting thresholds
 
-### 15.2 Caching
+### Evaluation
+- [ ] Golden dataset of 50–100 representative queries
+- [ ] LLM-as-judge scoring with a regression gate on pull requests
+- [ ] Faithfulness checks tying every claim to a tool observation
 
-**Current:** None. Every request re-hits every paid API. Two users asking about Goa on the same day pay twice for identical data.
+### Product
+- [ ] PostgreSQL checkpointer for durable multi-turn conversations
+- [ ] Response streaming via Server-Sent Events
+- [ ] PDF itinerary export
+- [ ] Flight and hotel booking integrations (Amadeus, Skyscanner)
+- [ ] User accounts and saved trips
+- [ ] Multi-city and multi-currency trip planning
 
-**What I'd add:**
+### Planned Container Build
 
-| Layer | TTL | Rationale |
-|---|---|---|
-| Weather | 1 hour | Changes slowly |
-| Places | 7 days | Attractions rarely change |
-| FX rates | 1 hour | Sufficient for trip budgeting |
-| Semantic LLM cache | — | Embed the question; serve cached answers above a similarity threshold |
-
-Expected impact: large cost reduction and a major latency win on repeat destinations.
-
-### 15.3 Containerisation (Docker)
-
-**Current:** No `Dockerfile`.
-
-**What I'd add** — multi-stage build, non-root user, healthcheck:
+The intended containerisation approach, for reference:
 
 ```dockerfile
 FROM python:3.10-slim AS builder
@@ -804,374 +791,69 @@ HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
 CMD ["uvicorn","main:app","--host","0.0.0.0","--port","8000"]
 ```
 
-Plus `docker-compose.yml` running `api`, `ui`, `postgres`, and `redis` on one network.
+### Scaling Considerations
 
-> **Note:** a `/health` endpoint must be added first — the app currently has none, and `/docs` is a poor healthcheck target because it does not exercise the agent.
-
-### 15.4 CI/CD
-
-**Current:** Not built. The project is **not yet a git repository**.
-
-**What I'd add** — GitHub Actions on every PR:
-
-| Stage | Tool |
-|---|---|
-| Lint | `ruff` |
-| Format check | `black --check` |
-| Type check | `mypy` |
-| Unit + integration tests | `pytest --cov` (fail under 80%) |
-| Secret scanning | `gitleaks` |
-| Dependency audit | `pip-audit` |
-| Build image | `docker build` |
-| Deploy | On `main` merge → staging → manual gate → production |
-
-**First step before any of this:** `git init`, commit, and push. CI cannot exist without version control.
-
-### 15.5 Observability & Monitoring
-
-**Current:** `logger/logging.py` and `exception/exceptiohandling.py` are **empty files**. The app uses bare `print()`.
-
-**What I'd add:**
-
-| Pillar | Tool | Signal |
+| Concern | Current design | Planned approach |
 |---|---|---|
-| **Logging** | `structlog` → JSON | Structured logs with a `request_id` correlating every tool call in one agent run |
-| **Tracing** | **LangSmith** or OpenTelemetry | Full agent trace: every LLM call, prompt, tool invocation, token count, latency |
-| **Metrics** | Prometheus + Grafana | p50/p95/p99 latency, tool error rate, tokens/request, cost/request, fallback rate |
-| **Alerting** | Alertmanager | Page on error rate > 5%, p95 > 120s, or daily spend over budget |
+| Requests take 20–90s | Synchronous | Job queue (Celery + Redis) with polling or WebSocket progress |
+| Single process | One Uvicorn worker | Multiple workers behind a load balancer; Kubernetes HPA |
+| No token streaming | Response returned whole | `graph.astream()` → Server-Sent Events |
+| Agent loop depth | Uncapped | `recursion_limit` on invoke to bound worst-case cost |
 
-**LLM-specific metrics that generic APM misses:**
-- Tokens per request (input/output split) and **cost per request**
-- **Tool-call success rate** per tool
-- **Fallback rate** — how often Google Places fails into Tavily (a rising rate signals quota/billing problems)
-- **Loop depth** — how many agent↔tools cycles per query; a spike indicates the model is thrashing
-- Time-to-first-token vs. total latency
+---
 
-**A concrete custom exception hierarchy** to fill the empty module:
-```python
-class NavoraException(Exception): ...
-class ToolExecutionError(NavoraException): ...
-class LLMProviderError(NavoraException): ...
-class ConfigurationError(NavoraException): ...
-```
+## 16. Troubleshooting
 
-### 15.6 LLM Evaluation
-
-**Current:** None. There is no way to tell whether a prompt or model change made output better or worse.
-
-**Why it matters:** LLM behaviour is non-deterministic. Without evals, every prompt tweak is a blind change and regressions ship silently.
-
-**What I'd add:**
-
-| Component | Detail |
-|---|---|
-| **Golden dataset** | 50–100 representative queries across destinations, durations, budgets |
-| **Deterministic assertions** | All 9 required sections present? Budget arithmetic internally consistent? Valid markdown? |
-| **LLM-as-judge** | A stronger model scores helpfulness, specificity, and faithfulness 1–5 against a rubric |
-| **Faithfulness / hallucination check** | Does every factual claim trace to a tool observation? |
-| **Trajectory eval** | Did the agent call the *right* tools in a sensible order? Cheapest high-signal eval for agents |
-| **Regression gate** | Block the PR if the aggregate score drops more than X% vs. `main` |
-| **Tooling** | LangSmith Evaluations, RAGAS, or `promptfoo` |
-
-### 15.7 Security
-
-**Current gaps:**
-
-| Issue | Risk | Fix |
+| Symptom | Cause | Resolution |
 |---|---|---|
-| `allow_origins=["*"]` | Any site can call the API | Explicit origin allowlist per environment |
-| No authentication | Anyone can burn your API quota | API keys or OAuth2/JWT |
-| No rate limiting | Cost-based DoS | `slowapi` per-IP + per-key limits |
-| Raw exceptions returned to client | Leaks internals | Log full trace server-side; return a generic message + `request_id` |
-| No input validation beyond type | Prompt injection surface | Length caps, content filtering |
-| Secrets in `.env` | Fine locally, wrong in prod | AWS Secrets Manager / Vault |
-
-### 15.8 Scalability
-
-| Concern | Current | Production approach |
-|---|---|---|
-| Long requests (20–90s) block | Synchronous | Job queue (Celery/Redis) + polling or WebSocket streaming |
-| Single process | One Uvicorn worker | Multiple workers behind a load balancer; K8s HPA |
-| No streaming | User stares at a spinner | `graph.astream()` → Server-Sent Events, tokens as they generate |
-| Unbounded agent loop | No cycle cap | `recursion_limit` on invoke to prevent runaway cost |
+| `ValidationError: Invalid API key provided` at startup | `GPLACES_API_KEY` missing or not in `AIza...` format | Provide a valid key or a correctly-formatted placeholder |
+| `ValueError: GROQ_API_KEY is not set` | Empty key in `.env` | Add a valid Groq key |
+| `401 Invalid API Key` in the response | Key present but incorrect | Regenerate at the provider console |
+| Streamlit shows `Connection refused` | Backend not running | Start `uvicorn` first, on port 8000 |
+| `FileNotFoundError: config.yaml` | Config file missing | Restore `config/config.yaml` |
+| Startup log mentions a diagram render failure | Mermaid render service unreachable | Non-fatal by design; startup continues normally |
+| First response takes 20–90s | Expected behaviour | Multiple sequential LLM and API round-trips |
+| `google.api_core` Python 3.10 EOL warning | Upstream deprecation notice | Informational; optionally move to Python 3.11 |
 
 ---
 
-## 16. Roadmap
-
-**Phase 1 — Engineering foundations**
-- [ ] `git init` + push to GitHub
-- [ ] `pytest` suite (unit → integration → e2e)
-- [ ] Fill `logger/` with `structlog`; fill `exception/` with the exception hierarchy
-- [ ] Add `/health` endpoint
-- [ ] Remove dead code (`arthamatic_op_tool.py`); wire up `save_document()`
-
-**Phase 2 — Productionisation**
-- [ ] Dockerfile + docker-compose
-- [ ] GitHub Actions CI
-- [ ] Redis caching layer
-- [ ] Rate limiting + API-key auth
-- [ ] Lock down CORS
-
-**Phase 3 — Quality**
-- [ ] LangSmith tracing
-- [ ] Golden eval dataset + LLM-as-judge
-- [ ] Prometheus/Grafana dashboard
-
-**Phase 4 — Product**
-- [ ] PostgreSQL checkpointer for multi-turn conversations
-- [ ] Response streaming (SSE)
-- [ ] PDF export
-- [ ] Flight/hotel booking APIs (Amadeus, Skyscanner)
-- [ ] User accounts + saved trips
-- [ ] Multi-city and multi-currency trips
-
----
-
-## 17. Troubleshooting
-
-| Symptom | Cause | Fix |
-|---|---|---|
-| `ValidationError: Invalid API key provided` **at startup** | `GPLACES_API_KEY` missing or not starting with `AIza` | Use a real key or the `AIzaSy...` placeholder |
-| `ValueError: GROQ_API_KEY is not set` | Empty key in `.env` | Add a real Groq key |
-| `401 Invalid API Key` in the response | Key present but wrong | Regenerate at the provider console |
-| Streamlit: `Connection refused` | Backend not running | Start `uvicorn` first, on port 8000 |
-| `FileNotFoundError: config.yaml` | Config file deleted | Restore `config/config.yaml` |
-| Server won't start, mentions Mermaid | Graph PNG render failed | Non-fatal by design — check network; startup continues |
-| Very slow first response | Expected | Multiple LLM + API round-trips; 20–90s is normal |
-| Wrong temperature units | Fixed — `units=metric` | See §19 |
-| `google.api_core` Python 3.10 EOL warning | Harmless | Ignore, or move to 3.11 |
-
----
-
-## 18. Engineering Decisions & Trade-offs
-
-| Decision | Alternative | Why this way | Cost |
-|---|---|---|---|
-| **LangGraph** for orchestration | Hand-rolled `while` loop | Free cycles, checkpointing, streaming, visualisation | Framework dependency + learning curve |
-| **Arithmetic as tools** | Let the LLM compute | Deterministic, auditable budgets | Extra round-trips |
-| **`utils/` free of LangChain** | Tools call APIs directly | Framework-swappable, unit-testable | One extra layer of indirection |
-| **Single agent, many tools** | Multi-agent (planner/researcher/writer) | Far simpler; adequate for this scope | Less specialisation |
-| **Graph built at startup** | Per request | Removes rebuild latency from every request | Bad keys crash boot instead of one request |
-| **Groq default** | OpenAI default | Much lower latency; agent loops multiply latency | Smaller model catalogue |
-| **Streamlit frontend** | React/Next.js | Zero JS toolchain, fast to build | Limited UX control |
-| **Two-tier search fallback** | Google Places only | Resilient to quota exhaustion | Two API keys to manage |
-| **YAML + `.env` split** | All env vars | Tunables reviewable in PRs | Two config sources |
-| **Fail-fast on missing keys** | Lazy failure | Clear errors at boot | Server won't start when misconfigured |
-
----
-
-## 19. Bugs Found & Fixed
-
-A code audit found and fixed 10 defects. These make excellent "tell me about a bug you debugged" stories.
-
-| # | Bug | Root cause | Fix |
-|---|---|---|---|
-| 1 | Currency API 404s | `base_url` ended in `/`, then `f"{base_url}/{cur}"` produced a double slash | Removed trailing slash |
-| 2 | Hotel cost string-repeated | Tool typed `price_per_night: str` but called `multiply(int,int)` — `"100"*3 == "100100100"` | Retyped to `float` + explicit coercion |
-| 3 | Tavily never authenticated | `.env` template had `TAVILAY_API_KEY` (typo) | Corrected to `TAVILY_API_KEY` |
-| 4 | Kelvin reported as °C | Current-weather call omitted `units=metric` while the forecast call had it | Added `units` |
-| 5 | Graph rebuilt every request | `GraphBuilder()` inside the route handler | Moved to FastAPI `lifespan` |
-| 6 | `raise` on an f-string | `raise f"..."` is a `TypeError`, masking the real error | Replaced with `st.error()` |
-| 7 | Config model_name ignored | `ChatOpenAI(model_name="o4-mini")` hardcoded after reading config | Use config value; added `else: raise` for unknown providers |
-| 8 | **Fallback never fired** | Empty-but-successful Google response returned `None` without raising, so `except` never ran | `raise ValueError` inside `try` on empty result |
-| 9 | Config only loaded from repo root | Relative path `"config/config.yaml"` | Resolve from `__file__` |
-| 10 | YAML missing from installed package | `find_packages()` ships no data files | `package_data` + `include_package_data` |
-
-> **Bug #8 is the best story.** It is a *silent* failure — no exception, no error log, just an agent quietly reasoning with missing data and producing a worse plan. It illustrates why "no errors in the logs" does not mean "working", and why the empty `logger/` module (§15.5) is a genuine risk rather than a cosmetic gap.
-
----
-
-## 20. Interview Preparation
-
-### 20.1 The 30-Second Pitch
-
-> "Navora AI is an agentic travel planner. Rather than asking an LLM to recall travel information — which it hallucinates — I gave the model a toolbox of ten functions wired to live APIs: weather, Google Places, currency rates, and budget arithmetic. It's built on LangGraph as a cyclic state machine implementing the ReAct pattern, so the agent autonomously decides which tools to call and in what order, loops until it has enough information, then synthesises a complete costed itinerary. Serving is FastAPI, the client is Streamlit, and the LLM provider is abstracted behind a gateway so Groq and OpenAI are interchangeable via config. The design decision I'm most confident in is delegating all arithmetic to Python tools — that makes the budget deterministic and auditable instead of hallucinated."
-
-### 20.2 The 2-Minute Deep Version
-
-Add to the above:
-- **The layering** — `tools/` are thin LangChain adapters; `utils/` is pure Python with zero framework imports, so the business logic is framework-swappable and fast to unit test.
-- **Graceful degradation** — Google Places falls back to Tavily AI search on both exception *and* empty result. I found the empty-result path was silently broken and fixed it.
-- **Docstrings as schema** — `bind_tools()` turns docstrings into the JSON Schema the model reads, so docstrings are functionally load-bearing, not comments.
-- **Honest gaps** — no tests, no Docker, no CI, no database, no eval harness. I know exactly what each would look like and why each matters, and I'd prioritise the test suite and observability first.
-
-### 20.3 Likely Questions & Strong Answers
-
-<details>
-<summary><b>Q: What is an "AI agent"? How is it different from a chatbot?</b></summary>
-
-A chatbot maps input to output in one pass. An agent runs a **loop**: it reasons about what it needs, takes an **action** (calls a tool), **observes** the result, and repeats until the task is done. The defining property is **autonomous multi-step decision-making** — I don't hardcode the sequence. For "plan a Goa trip", the agent itself decides to check weather first, then attractions, then compute the budget.
-</details>
-
-<details>
-<summary><b>Q: Why LangGraph instead of LangChain's AgentExecutor or a plain loop?</b></summary>
-
-Agent loops are **cyclic** — `agent → tools → agent`. Most workflow tools model DAGs, which cannot express a cycle. LangGraph is built for cyclic stateful graphs. Over a hand-rolled `while` loop it gives me checkpointing, streaming, visualisation, parallel tool fan-out, and interrupt/resume points for free. Over `AgentExecutor` it gives explicit, inspectable control flow instead of a black box.
-</details>
-
-<details>
-<summary><b>Q: How do you stop the LLM hallucinating prices and hotels?</b></summary>
-
-Three layers. **Grounding** — every factual claim comes from a live API observation, not model memory. **Deterministic computation** — all arithmetic runs in Python tools, so budgets are calculated, never predicted. **Prompt constraints** — the system prompt mandates tool use and specifies the required output structure. What I have *not* built is an automated faithfulness check that verifies every claim traces to a tool observation — that's in the eval roadmap.
-</details>
-
-<details>
-<summary><b>Q: Why make arithmetic a tool? The model can do maths.</b></summary>
-
-It can't, reliably. LLMs are next-token predictors; multi-step arithmetic is a known weakness, and a travel budget is exactly that — multiply nightly rate by nights, sum categories, divide by days. One wrong digit destroys user trust. Routing it to Python makes it deterministic, auditable, and unit-testable. The cost is extra round-trips, which is a trade I'd make every time.
-</details>
-
-<details>
-<summary><b>Q: Walk me through what happens on a request.</b></summary>
-
-Streamlit POSTs to `/query`. Pydantic validates the body. The question is wrapped as `{"messages":[q]}` and passed to the graph — pre-compiled at startup, not per request. The `agent` node prepends the system prompt and calls the LLM with tool schemas bound. `tools_condition` inspects the response: if it contains tool calls, route to `ToolNode`, which executes them and appends `ToolMessage`s to state; then the edge loops back to `agent`. That cycle repeats until the LLM returns a message with no tool calls, which routes to `END`. The last message's content is returned as `{"answer": ...}` and rendered as markdown.
-</details>
-
-<details>
-<summary><b>Q: What happens when an external API goes down?</b></summary>
-
-Depends on the tool. Place search has a real fallback — Google Places failures (exception *or* empty result) transparently route to Tavily AI search, so the agent still gets data. Weather returns `{}` on non-200 and the tool returns a friendly "could not fetch" string, so the agent continues without it. Currency raises. What's missing is retry with exponential backoff and a circuit breaker — a repeatedly-failing API is currently retried on every request with no cooldown.
-</details>
-
-<details>
-<summary><b>Q: How would you test a non-deterministic system?</b></summary>
-
-Separate the deterministic parts from the generative ones. Everything in `utils/` is pure Python and unit-tests normally — that's exactly why I kept LangChain out of it. For agent logic I mock the LLM and assert on **control flow**: given a mocked response containing a tool call, does it route to the tools node? For the generative output I assert **structure not prose** — required sections present, budget totals internally consistent. For quality regression you need **LLM-as-judge** against a golden dataset with a score threshold gating the PR. And **trajectory evaluation** — did it call the right tools in a sensible order — is the highest-signal, cheapest agent eval.
-</details>
-
-<details>
-<summary><b>Q: This has no tests, no CI, no Docker. Why should I hire you?</b></summary>
-
-Because I can tell you precisely what's missing, why it matters, and what I'd build — which is in the README rather than hidden. This was built to learn agent orchestration, and that part is solid and verified. Productionising it is well-understood work: pytest with mocked network boundaries, a multi-stage Dockerfile with a non-root user and healthcheck, GitHub Actions running ruff/mypy/pytest with a coverage gate, and LangSmith tracing. I'd sequence tests and observability first, because without them every other change is unverifiable. I'd rather show you an honest status table than claim a deployment I don't have.
-</details>
-
-<details>
-<summary><b>Q: How do you control cost?</b></summary>
-
-Today, poorly — and I know it. There's no caching, so every request re-hits every paid API, and no token budgeting. The fixes in priority order: Redis caching with per-source TTLs (weather 1h, places 7d, FX 1h), semantic caching on question embeddings, per-request token and cost tracking through the LLM gateway, a `recursion_limit` to cap runaway agent loops, and routing simple queries to a cheaper model. The gateway in `model_loader.py` is the right seam for all of it.
-</details>
-
-<details>
-<summary><b>Q: How would you scale this to 10,000 users?</b></summary>
-
-The blocker is that requests take 20–90 seconds and are synchronous. First, make it async: accept the request, enqueue a job (Celery + Redis), return a job ID, and stream progress over WebSocket or SSE. Second, cache aggressively — popular destinations repeat heavily, so a cache hit rate of even 50% halves both cost and latency. Third, horizontal scaling: containerise, run multiple Uvicorn workers behind a load balancer, autoscale on queue depth. Fourth, move conversation state into Postgres via a LangGraph checkpointer so any worker can serve any request. Fifth, rate limit per user to bound cost exposure.
-</details>
-
-<details>
-<summary><b>Q: What's the hardest bug you hit here?</b></summary>
-
-A silent fallback failure. Place search was supposed to fall back to Tavily when Google Places failed. It worked for exceptions — but when Google returned a **successful but empty** response, the `if result:` guard was false, the function fell off the end returning `None`, and the `except` block never ran. No exception, no log line, no error. The agent just received nothing and quietly produced a thinner itinerary. I fixed it by raising explicitly inside the `try` on an empty result so both paths converge on the fallback. The lesson is that "no errors in the logs" is not evidence of correctness — which is exactly why I flag the empty logging module as a real risk.
-</details>
-
-<details>
-<summary><b>Q: Why Groq?</b></summary>
-
-Latency. Groq runs on LPU hardware with much faster token generation than typical GPU inference. That matters disproportionately for agents because an agent makes **several sequential LLM calls per request** — latency multiplies by loop depth. A 2× faster model is roughly a 2× faster product here. I chose `deepseek-r1-distill-llama-70b` specifically because it's reasoning-distilled, which suits multi-step tool planning. And because the provider sits behind a gateway, switching is a config change if the trade-off shifts.
-</details>
-
-<details>
-<summary><b>Q: What would you do differently if you started over?</b></summary>
-
-Three things. Write tests alongside the code instead of after — retrofitting tests onto working code is much harder than it sounds. Set up structured logging and tracing on day one, because debugging agents without a trace of every LLM call and tool invocation is guesswork. And initialise git immediately — this project isn't under version control yet, which is the root reason there's no CI.
-</details>
-
-### 20.4 Resume Bullets
-
-Pick 3–4. Every claim below is verifiable in the code.
-
-**Concise**
-> **Navora AI — Agentic Travel Planner** · *Python, LangGraph, LangChain, FastAPI, Streamlit, Groq*
-> - Built an autonomous AI agent using **LangGraph's cyclic state machine** implementing the **ReAct pattern**, orchestrating **10 custom tools** across 4 external APIs to generate complete, costed travel itineraries from a single prompt.
-> - Designed a **layered tool architecture** separating framework-agnostic service clients from LangChain adapters, making business logic independently unit-testable and the agent framework swappable.
-> - Implemented **two-tier retrieval with graceful degradation** — Google Places with automatic fallback to Tavily AI search — eliminating a single point of failure in the data pipeline.
-> - Eliminated LLM arithmetic hallucination by **delegating all budget computation to deterministic Python tools**, making cost breakdowns auditable rather than predicted.
-
-**Impact-focused**
-> - Architected a production-pattern **LLM gateway** abstracting Groq and OpenAI behind a YAML-driven model registry, enabling provider switching via configuration with zero code changes.
-> - Reduced per-request overhead by **moving agent graph compilation from request-time to a FastAPI `lifespan` startup hook**, verified as zero rebuilds across repeated requests.
-> - Conducted a full code audit identifying and fixing **10 defects**, including a silent fallback failure where successful-but-empty API responses bypassed error handling and degraded agent output with no observable error.
-
-**Non-technical / business framing** (for recruiters and non-engineering panels)
-> - Built an AI research assistant that replaces hours of manual trip planning across a dozen websites with a single request, returning a complete itinerary with verified live data and a full budget.
-> - Ensured reliability by designing the system to **automatically switch to a backup data source** when its primary provider is unavailable, so users get an answer rather than an error.
-> - Prioritised **trustworthy output** by grounding every factual claim in a live data source and computing all costs deterministically, directly addressing AI's well-known tendency to invent plausible-sounding details.
-
-### 20.5 Red Flags to Pre-empt
-
-Bring these up **before** you're asked — it reads as maturity, not weakness.
-
-| Likely challenge | Your answer |
-|---|---|
-| "No tests." | "Correct, and it's my top priority. Here's the exact suite structure and why `utils/` was designed to make it easy." |
-| "Not deployed." | "It runs locally. I've specified the Dockerfile and CI pipeline; I haven't executed the deployment." |
-| "Single agent is simple." | "Deliberately. Multi-agent adds coordination overhead that this scope doesn't justify. I can explain when I *would* split it." |
-| "CORS is wide open." | "A prototype default and a real vulnerability. Production needs an explicit allowlist, auth, and rate limiting." |
-| "Empty logger module." | "The most honest flaw in the repo — and bug #8 is exactly the kind of silent failure it would have caught." |
-
-### 20.6 Concepts to Be Able to Explain Cold
-
-**Agentic:** agent vs. chatbot · ReAct · tool calling / function calling · agent loop · state machine · cyclic graph · reducer · tool schema · system prompt · grounding · hallucination · prompt engineering
-
-**Engineering:** REST · ASGI vs. WSGI · Pydantic validation · dependency injection · adapter pattern · separation of concerns · graceful degradation · fail-fast · circuit breaker · idempotency · statelessness · lifespan/startup hooks · CORS
-
-**Production ML:** LLM gateway · semantic caching · token budgeting · observability (logs/metrics/traces) · LLM-as-judge · golden dataset · trajectory evaluation · regression gating · drift
-
----
-
-## 21. Glossary
-
-### Technical
+## 17. Glossary
 
 | Term | Meaning |
 |---|---|
-| **Agent** | An LLM that can take actions via tools in a loop, deciding its own steps |
+| **Agent** | An LLM that takes actions via tools in a loop, deciding its own steps |
 | **ReAct** | *Reasoning + Acting* — alternating thought and tool use |
-| **Tool / Function calling** | Exposing a function's schema so the model can request it be run |
+| **Tool / function calling** | Exposing a function's schema so the model can request its execution |
 | **LangGraph** | Framework for cyclic, stateful agent graphs |
 | **StateGraph** | A graph whose nodes read and mutate shared state |
-| **Reducer** | Function defining how a state update merges (here: append) |
+| **Reducer** | Function defining how a state update merges (here, append) |
 | **ToolNode** | Prebuilt node that executes tool calls from the last AI message |
-| **`tools_condition`** | Prebuilt router: tools if calls exist, else END |
+| **`tools_condition`** | Prebuilt router: to tools if calls exist, else to END |
 | **Checkpointer** | Persists graph state so conversations survive restarts |
 | **Grounding** | Anchoring generated text in retrieved real data |
-| **Hallucination** | Fluent, confident, false model output |
+| **Hallucination** | Fluent, confident, factually incorrect model output |
 | **RAG** | Retrieval-Augmented Generation — retrieval from an owned index |
-| **LLM Gateway** | Abstraction layer over model vendors |
+| **LLM gateway** | Abstraction layer over model vendors |
 | **LPU** | Groq's Language Processing Unit — inference-optimised hardware |
 | **Token** | Sub-word unit; the billing and context unit for LLMs |
-| **Context window** | Max tokens a model can consider at once |
+| **Context window** | Maximum tokens a model can consider at once |
 | **System prompt** | Instruction defining the model's role and constraints |
-| **ASGI** | Async Server Gateway Interface — async successor to WSGI |
-| **Pydantic** | Runtime validation from Python type hints |
-| **Lifespan** | FastAPI startup/shutdown hook |
-| **CORS** | Browser policy controlling cross-origin requests |
-| **Graceful degradation** | Continuing with reduced capability instead of failing |
+| **ASGI** | Asynchronous Server Gateway Interface |
+| **Lifespan** | FastAPI startup and shutdown hook |
+| **CORS** | Browser policy governing cross-origin requests |
+| **Graceful degradation** | Continuing with reduced capability instead of failing outright |
 | **Circuit breaker** | Stops calling a failing dependency for a cooldown period |
 | **LLM-as-judge** | Using a model to score another model's output |
 | **Golden dataset** | Curated test inputs with expected quality criteria |
-| **Trajectory evaluation** | Scoring the agent's *sequence of tool calls*, not just the answer |
-| **Observability** | Logs + metrics + traces |
-| **p95 latency** | 95% of requests are faster than this |
-| **Multi-stage build** | Docker pattern separating build tools from the runtime image |
-
-### Non-Technical / Business
-
-| Term | Meaning in this project |
-|---|---|
-| **Agentic AI** | AI that *does things* rather than only answering |
-| **Grounded AI** | AI whose answers are backed by real, checkable sources |
-| **Single point of failure** | One component whose outage breaks everything — removed here by the search fallback |
-| **Vendor lock-in** | Dependence on one supplier — avoided via the LLM gateway |
-| **Fail-fast** | Surface problems immediately rather than degrading silently |
-| **Technical debt** | Deferred work (tests, Docker, CI) tracked openly in §15 |
-| **MVP** | Minimum Viable Product — what this is |
-| **Cost per request** | Unit economics of an AI product; the main scaling constraint |
-| **Time to first token** | How long before the user sees *anything* — a key UX metric |
-| **User trust** | Why deterministic budgets matter more than fast ones |
-| **Prototype vs. production** | Working software vs. software that survives real traffic |
+| **Trajectory evaluation** | Scoring an agent's *sequence of tool calls*, not just its answer |
+| **Observability** | Logs, metrics, and traces taken together |
+| **p95 latency** | The latency below which 95% of requests complete |
 
 ---
+
+## 📚 Further Documentation
+
+Extended technical notes — architecture rationale, implementation status detail, engineering case studies, and concept references — are maintained in [`docs/PROJECT_NOTES.md`](docs/PROJECT_NOTES.md).
 
 ## 🙏 Acknowledgements
 
@@ -1179,7 +861,7 @@ Built with [LangChain](https://python.langchain.com/) and [LangGraph](https://la
 
 ## 📄 License
 
-No license file is currently present. Add one (MIT is the common default) before publishing.
+Released under the MIT License. Add a `LICENSE` file before publishing.
 
 ---
 
